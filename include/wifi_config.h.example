@@ -1,5 +1,9 @@
-// Copy this file to wifi_config.h and set your WiFi credentials.
-// wifi_config.h is not committed (add to .gitignore if you use git).
+// Copy this file to wifi_config.h and set your credentials.
+// wifi_config.h is gitignored and will not be committed.
 
+// Router (STA mode) - set to connect to your WiFi network
 #define WIFI_SSID     "YourNetworkName"
 #define WIFI_PASSWORD "YourPassword"
+
+// Access Point - override default AP password (SSID is auto-generated from MAC)
+// #define AP_PASSWORD   "nohjeye123"

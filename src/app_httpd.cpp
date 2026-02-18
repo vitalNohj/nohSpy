@@ -20,6 +20,8 @@
 #include "sdkconfig.h"
 #include "camera_index.h"
 #include "board_config.h"
+#include <Arduino.h>
+#include <WiFi.h>
 
 #if defined(ARDUINO_ARCH_ESP32) && defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
@@ -336,6 +338,9 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
   int val = atoi(value);
   log_i("%s = %d", variable, val);
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    return httpd_resp_send_500(req);
+  }
   int res = 0;
 
   if (!strcmp(variable, "framesize")) {
@@ -418,6 +423,11 @@ static esp_err_t status_handler(httpd_req_t *req) {
   static char json_response[1024];
 
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    return httpd_resp_send(req, "{\"error\":\"camera not initialized\"}", HTTPD_RESP_USE_STRLEN);
+  }
   char *p = json_response;
   *p++ = '{';
 
@@ -649,11 +659,66 @@ static esp_err_t win_handler(httpd_req_t *req) {
   return httpd_resp_send(req, NULL, 0);
 }
 
+static esp_err_t info_handler(httpd_req_t *req) {
+  static char json[1536];
+  char *p = json;
+
+  *p++ = '{';
+  p += sprintf(p, "\"uptime_s\":%lld,", esp_timer_get_time() / 1000000);
+  p += sprintf(p, "\"chip\":\"%s\",", ESP.getChipModel());
+  p += sprintf(p, "\"chip_rev\":%u,", ESP.getChipRevision());
+  p += sprintf(p, "\"cores\":%u,", ESP.getChipCores());
+  p += sprintf(p, "\"cpu_mhz\":%u,", (unsigned)ESP.getCpuFreqMHz());
+  p += sprintf(p, "\"flash_mb\":%u,", (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
+  p += sprintf(p, "\"sdk\":\"%s\",", ESP.getSdkVersion());
+  p += sprintf(p, "\"free_heap\":%u,", (unsigned)ESP.getFreeHeap());
+  p += sprintf(p, "\"min_free_heap\":%u,", (unsigned)ESP.getMinFreeHeap());
+  p += sprintf(p, "\"psram\":%s,", psramFound() ? "true" : "false");
+  if (psramFound()) {
+    p += sprintf(p, "\"psram_size\":%u,", (unsigned)ESP.getPsramSize());
+    p += sprintf(p, "\"psram_free\":%u,", (unsigned)ESP.getFreePsram());
+  }
+  p += sprintf(p, "\"ap_ip\":\"%s\",", WiFi.softAPIP().toString().c_str());
+  p += sprintf(p, "\"ap_mac\":\"%s\",", WiFi.softAPmacAddress().c_str());
+  p += sprintf(p, "\"ap_clients\":%d,", WiFi.softAPgetStationNum());
+  p += sprintf(p, "\"sta_connected\":%s,", WiFi.status() == WL_CONNECTED ? "true" : "false");
+  p += sprintf(p, "\"sta_ip\":\"%s\",", WiFi.localIP().toString().c_str());
+  p += sprintf(p, "\"sta_mac\":\"%s\",", WiFi.macAddress().c_str());
+  if (WiFi.status() == WL_CONNECTED) {
+    p += sprintf(p, "\"sta_rssi\":%d,", WiFi.RSSI());
+    p += sprintf(p, "\"sta_ssid\":\"%s\",", WiFi.SSID().c_str());
+  }
+  p += sprintf(p, "\"http_port\":80,");
+  p += sprintf(p, "\"stream_port\":81,");
+
+  sensor_t *s = esp_camera_sensor_get();
+  if (s) {
+    p += sprintf(p, "\"cam_pid\":\"0x%02X\",", s->id.PID);
+    p += sprintf(p, "\"framesize\":%u,", s->status.framesize);
+    p += sprintf(p, "\"quality\":%u", s->status.quality);
+  } else {
+    p += sprintf(p, "\"cam_pid\":\"none\"");
+  }
+
+  *p++ = '}';
+  *p = '\0';
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, json, strlen(json));
+}
+
 static esp_err_t index_handler(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
   /* OV2640 UI only (this project targets Freenove OV2640 boards) */
   return httpd_resp_send(req, (const char *)index_ov2640_html_gz, index_ov2640_html_gz_len);
+}
+
+static esp_err_t captive_handler(httpd_req_t *req, httpd_err_code_t err) {
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", "http://4.3.2.1/");
+  return httpd_resp_send(req, "Redirecting to camera...", HTTPD_RESP_USE_STRLEN);
 }
 
 void startCameraServer() {
@@ -803,10 +868,24 @@ void startCameraServer() {
 #endif
   };
 
+  httpd_uri_t info_uri = {
+    .uri = "/info",
+    .method = HTTP_GET,
+    .handler = info_handler,
+    .user_ctx = NULL
+#ifdef CONFIG_HTTPD_WS_SUPPORT
+    ,
+    .is_websocket = true,
+    .handle_ws_control_frames = false,
+    .supported_subprotocol = NULL
+#endif
+  };
+
   ra_filter_init(&ra_filter, 20);
 
   log_i("Starting web server on port: '%d'", config.server_port);
   if (httpd_start(&camera_httpd, &config) == ESP_OK) {
+    httpd_register_err_handler(camera_httpd, HTTPD_404_NOT_FOUND, captive_handler);
     httpd_register_uri_handler(camera_httpd, &index_uri);
     httpd_register_uri_handler(camera_httpd, &cmd_uri);
     httpd_register_uri_handler(camera_httpd, &status_uri);
@@ -818,6 +897,7 @@ void startCameraServer() {
     httpd_register_uri_handler(camera_httpd, &greg_uri);
     httpd_register_uri_handler(camera_httpd, &pll_uri);
     httpd_register_uri_handler(camera_httpd, &win_uri);
+    httpd_register_uri_handler(camera_httpd, &info_uri);
   }
 
   config.server_port += 1;
