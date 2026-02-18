@@ -1,0 +1,5 @@
+// Copy this file to wifi_config.h and set your WiFi credentials.
+// wifi_config.h is not committed (add to .gitignore if you use git).
+
+#define WIFI_SSID     "YourNetworkName"
+#define WIFI_PASSWORD "YourPassword"
