@@ -59,6 +59,13 @@ typedef struct {
 
 static ra_filter_t ra_filter;
 
+static esp_err_t camera_not_ready(httpd_req_t *req) {
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_status(req, "503 Service Unavailable");
+  return httpd_resp_send(req, "{\"error\":\"camera not initialized\"}", HTTPD_RESP_USE_STRLEN);
+}
+
 static ra_filter_t *ra_filter_init(ra_filter_t *filter, size_t sample_size) {
   memset(filter, 0, sizeof(ra_filter_t));
 
@@ -103,6 +110,9 @@ void enable_led(bool en) {  // Turn LED On or Off
 #endif
 
 static esp_err_t bmp_handler(httpd_req_t *req) {
+  if (!esp_camera_sensor_get()) {
+    return camera_not_ready(req);
+  }
   camera_fb_t *fb = NULL;
   esp_err_t res = ESP_OK;
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
@@ -154,6 +164,9 @@ static size_t jpg_encode_stream(void *arg, size_t index, const void *data, size_
 }
 
 static esp_err_t capture_handler(httpd_req_t *req) {
+  if (!esp_camera_sensor_get()) {
+    return camera_not_ready(req);
+  }
   camera_fb_t *fb = NULL;
   esp_err_t res = ESP_OK;
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_INFO
@@ -208,12 +221,16 @@ static esp_err_t capture_handler(httpd_req_t *req) {
 }
 
 static esp_err_t stream_handler(httpd_req_t *req) {
+  if (!esp_camera_sensor_get()) {
+    return camera_not_ready(req);
+  }
   camera_fb_t *fb = NULL;
   struct timeval _timestamp;
   esp_err_t res = ESP_OK;
   size_t _jpg_buf_len = 0;
   uint8_t *_jpg_buf = NULL;
-  char *part_buf[128];
+  char part_buf[128];
+  uint8_t consecutive_failures = 0;
 
   static int64_t last_frame = 0;
   if (!last_frame) {
@@ -237,8 +254,15 @@ static esp_err_t stream_handler(httpd_req_t *req) {
     fb = esp_camera_fb_get();
     if (!fb) {
       log_e("Camera capture failed");
-      res = ESP_FAIL;
+      consecutive_failures++;
+      if (consecutive_failures >= 5) {
+        res = ESP_FAIL;
+      } else {
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+        continue;
+      }
     } else {
+      consecutive_failures = 0;
       _timestamp.tv_sec = fb->timestamp.tv_sec;
       _timestamp.tv_usec = fb->timestamp.tv_usec;
       if (fb->format != PIXFORMAT_JPEG) {
@@ -339,7 +363,7 @@ static esp_err_t cmd_handler(httpd_req_t *req) {
   log_i("%s = %d", variable, val);
   sensor_t *s = esp_camera_sensor_get();
   if (!s) {
-    return httpd_resp_send_500(req);
+    return camera_not_ready(req);
   }
   int res = 0;
 
@@ -517,6 +541,9 @@ static esp_err_t xclk_handler(httpd_req_t *req) {
   log_i("Set XCLK: %d MHz", xclk);
 
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    return camera_not_ready(req);
+  }
   int res = s->set_xclk(s, LEDC_TIMER_0, xclk);
   if (res) {
     return httpd_resp_send_500(req);
@@ -549,6 +576,9 @@ static esp_err_t reg_handler(httpd_req_t *req) {
   log_i("Set Register: reg: 0x%02x, mask: 0x%02x, value: 0x%02x", reg, mask, val);
 
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    return camera_not_ready(req);
+  }
   int res = s->set_reg(s, reg, mask, val);
   if (res) {
     return httpd_resp_send_500(req);
@@ -576,6 +606,9 @@ static esp_err_t greg_handler(httpd_req_t *req) {
   int reg = atoi(_reg);
   int mask = atoi(_mask);
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    return camera_not_ready(req);
+  }
   int res = s->get_reg(s, reg, mask);
   if (res < 0) {
     return httpd_resp_send_500(req);
@@ -615,6 +648,9 @@ static esp_err_t pll_handler(httpd_req_t *req) {
 
   log_i("Set Pll: bypass: %d, mul: %d, sys: %d, root: %d, pre: %d, seld5: %d, pclken: %d, pclk: %d", bypass, mul, sys, root, pre, seld5, pclken, pclk);
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    return camera_not_ready(req);
+  }
   int res = s->set_pll(s, bypass, mul, sys, root, pre, seld5, pclken, pclk);
   if (res) {
     return httpd_resp_send_500(req);
@@ -650,6 +686,9 @@ static esp_err_t win_handler(httpd_req_t *req) {
     totalX, totalY, outputX, outputY, scale, binning  // codespell:ignore totaly
   );
   sensor_t *s = esp_camera_sensor_get();
+  if (!s) {
+    return camera_not_ready(req);
+  }
   int res = s->set_res_raw(s, startX, startY, endX, endY, offsetX, offsetY, totalX, totalY, outputX, outputY, scale, binning);  // codespell:ignore totaly
   if (res) {
     return httpd_resp_send_500(req);

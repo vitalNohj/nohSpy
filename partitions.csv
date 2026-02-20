@@ -1,13 +1,13 @@
-# NohJEye ESP32-WROVER (FNK0060) - Custom Partition Table
-# Total flash: 4MB (0x400000)
+# NohJEye - Freenove ESP32-S3 WROOM N8R8 - Custom Partition Table
+# Total flash: 8MB (0x800000)
 #
 # nvs       20 KB  - WiFi calibration data, NVS key-value storage
 # otadata    8 KB  - OTA partition state tracking
 # app0       3 MB  - Application firmware (3,145,728 bytes)
-# spiffs   960 KB  - SPIFFS filesystem for persistent config and logs
+# spiffs   ~4.9 MB - SPIFFS filesystem for persistent config and logs
 #
 # Name,     Type,  SubType,  Offset,    Size,      Flags
 nvs,        data,  nvs,      0x9000,    0x5000,
 otadata,    data,  ota,      0xe000,    0x2000,
 app0,       app,   factory,  0x10000,   0x300000,
-spiffs,     data,  spiffs,   0x310000,  0xF0000,
+spiffs,     data,  spiffs,   0x310000,  0x4F0000,
