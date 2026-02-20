@@ -22,10 +22,10 @@
 #endif
 
 #ifndef WIFI_SSID
-#define WIFI_SSID "********"
+#define WIFI_SSID "temporary_ssid"
 #endif
 #ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD "********"`
+#define WIFI_PASSWORD "12345678"
 #endif
 #ifndef AP_PASSWORD
 #define AP_PASSWORD "nohjeye123"
@@ -160,7 +160,7 @@ static void init_wifi() {
   uint8_t mac[6];
   WiFi.macAddress(mac);
   char ap_ssid[32];
-  snprintf(ap_ssid, sizeof(ap_ssid), "NohJEye-%02X%02X", mac[4], mac[5]);
+  snprintf(ap_ssid, sizeof(ap_ssid), "NohSpye-%02X%02X", mac[4], mac[5]);
 
   WiFi.softAP(ap_ssid, AP_PASSWORD, AP_CHANNEL, 0, AP_MAX_CONN);
   delay(100);
